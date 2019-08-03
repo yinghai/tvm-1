@@ -13,6 +13,7 @@
 struct TVMObject {
   tvm::PackedFunc kernel;
   tvm::PackedFunc set_input;
+  tvm::PackedFunc set_input_zero_copy;
   tvm::PackedFunc get_output;
   // Map input indices to values in the subgraph
   std::vector<torch::jit::Value*> input_values;

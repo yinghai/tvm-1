@@ -8,6 +8,9 @@
 
 using namespace torch::jit;
 
+namespace {
+constexpr size_t kAlignment = 64;
+}
 
 tvm::relay::DataType scalarTypeToTVMType(at::ScalarType pt_type) {
   static const std::unordered_map<at::ScalarType, tvm::relay::DataType> type_mapping = {
@@ -278,7 +281,8 @@ void TVMCompiler::run(Stack& stack) {
     TORCH_INTERNAL_ASSERT(pfr);
     tvm::runtime::Module run_mod =
         (*pfr)(json, mod, (int)ctx_.device_type, (int)ctx_.device_id);
-    cache_[spec].set_input = run_mod.GetFunction("set_input_zero_copy", false);
+    cache_[spec].set_input = run_mod.GetFunction("set_input", false);
+    cache_[spec].set_input_zero_copy = run_mod.GetFunction("set_input_zero_copy", false);
     cache_[spec].kernel = run_mod.GetFunction("run", false);
     cache_[spec].get_output = run_mod.GetFunction("get_output", false);
     auto get_num_outputs = run_mod.GetFunction("get_num_outputs", false);
@@ -296,9 +300,14 @@ void TVMCompiler::run(Stack& stack) {
       value_to_ivalue[value] = optional_ivalue.value();
     }
     auto ivalue = value_to_ivalue.at(cache_[spec].input_values[i]);
+    // TODO: support more data types
     auto tensor = ivalue.toTensor().to(at::kFloat);
     auto dl_tensor = at::toDLPack(tensor);
-    cache_[spec].set_input(i, tvm::runtime::NDArray::FromDLPack(dl_tensor));
+    if (static_cast<size_t>(dl_tensor.data) % kAlignment == 0) {
+      cache_[spec].set_input_zero_copy(i, &dl_tensor);
+    } else {
+      cache_[spec].set_input(i, tvm::runtime::NDArray::FromDLPack(dl_tensor));
+    }
   }
 
   cache_[spec].kernel();
